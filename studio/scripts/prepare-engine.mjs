@@ -22,6 +22,10 @@ const binariesDir = path.join(studioRoot, "src-tauri", "binaries");
 const destination = path.join(binariesDir, `open-ontologies-${targetTriple}${ext}`);
 
 if (!fs.existsSync(source)) {
+  if (process.platform === "linux") {
+    console.error(`Cannot prepare Linux package: missing engine binary ${source}`);
+    process.exit(1);
+  }
   console.warn(
     `Skipping engine bundle prep: ${source} does not exist. Build the engine first with cargo build --release.`,
   );

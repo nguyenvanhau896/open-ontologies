@@ -43,7 +43,22 @@ fn find_existing_binary(dir: &Path) -> Option<PathBuf> {
         .find(|path| path.exists())
 }
 
-fn resolve_engine_binary() -> Result<PathBuf, String> {
+pub(crate) fn resolve_engine_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(path) = exe.parent().and_then(find_existing_binary) {
+            return Ok(path);
+        }
+    }
+    if let Ok(dir) = app.path().resource_dir() {
+        if let Some(path) = find_existing_binary(&dir) {
+            return Ok(path);
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    return Err("Bundled open-ontologies engine was not found".into());
+
+    #[cfg(debug_assertions)]
+    {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let bundled_dir = manifest_dir.join("binaries");
     if let Some(path) = find_existing_binary(&bundled_dir) {
@@ -65,59 +80,6 @@ fn resolve_engine_binary() -> Result<PathBuf, String> {
         "No open-ontologies binary found. Checked {} and workspace target/{{release,debug}}.",
         bundled_dir.display()
     ))
-}
-
-fn stale_pids_on_port(port: u16) -> Vec<u32> {
-    #[cfg(target_os = "windows")]
-    {
-        let output = Command::new("netstat")
-            .args(["-ano", "-p", "tcp"])
-            .output();
-        let Ok(output) = output else {
-            return Vec::new();
-        };
-        let needle = format!(":{}", port);
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter(|line| line.contains("LISTENING") && line.contains(&needle))
-            .filter_map(|line| line.split_whitespace().last())
-            .filter_map(|pid| pid.parse::<u32>().ok())
-            .collect()
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let output = Command::new("lsof")
-            .args(["-ti", &format!("tcp:{}", port)])
-            .output();
-        let Ok(output) = output else {
-            return Vec::new();
-        };
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| line.trim().parse::<u32>().ok())
-            .collect()
-    }
-}
-
-fn kill_process(pid: u32) {
-    #[cfg(target_os = "windows")]
-    let _ = Command::new("taskkill")
-        .args(["/F", "/PID", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-
-    #[cfg(not(target_os = "windows"))]
-    let _ = Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-fn clear_stale_port(port: u16) {
-    for pid in stale_pids_on_port(port) {
-        kill_process(pid);
     }
 }
 
@@ -153,16 +115,17 @@ pub fn get_engine_port() -> u16 {
 }
 
 pub fn spawn_engine(app: &tauri::AppHandle) -> Result<(), String> {
-    let binary = resolve_engine_binary()?;
+    let binary = resolve_engine_binary(app)?;
     let port = engine_port();
-    clear_stale_port(port);
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    if std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
+        return Err(format!("Engine port {port} is unavailable; set OPEN_ONTOLOGIES_STUDIO_PORT to a free port"));
+    }
 
     eprintln!("[engine] spawning {}", binary.display());
 
     let mut child = Command::new(&binary)
         .args(["serve-http", "--port", &port.to_string()])
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to spawn engine {}: {e}", binary.display()))?;
@@ -174,10 +137,7 @@ pub fn spawn_engine(app: &tauri::AppHandle) -> Result<(), String> {
         for line in reader.lines() {
             if let Ok(line) = line {
                 eprintln!("[engine] {}", line);
-                if line.contains("listening") || line.contains("Listening") || line.contains(&port.to_string())
-                {
-                    let _ = app_handle.emit("engine-ready", true);
-                }
+
             }
         }
         let _ = app_handle.emit("engine-stopped", true);
@@ -185,12 +145,6 @@ pub fn spawn_engine(app: &tauri::AppHandle) -> Result<(), String> {
 
     let state = app.state::<EngineState>();
     *state.child.lock().map_err(|e| format!("Lock error: {e}"))? = Some(child);
-
-    let app_handle2 = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        let _ = app_handle2.emit("engine-ready", true);
-    });
 
     Ok(())
 }

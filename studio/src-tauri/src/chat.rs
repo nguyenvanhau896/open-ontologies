@@ -121,7 +121,10 @@ fn sidecar_entry(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 pub fn spawn_agent_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
     let entry = sidecar_entry(app)?;
-    let node = resolve_node_binary();
+    let node = app.path().resource_dir().ok()
+        .map(|dir| dir.join("runtime").join(if cfg!(windows) { "node.exe" } else { "node" }))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(resolve_node_binary);
 
     // Same port the engine itself was spawned with (see engine::engine_port,
     // the single place that resolves it). Passed through the environment
@@ -134,6 +137,7 @@ pub fn spawn_agent_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("PATH", augmented_path())
+        .env("ONTO_CHAT_CACHE", crate::corpus::repo_root().join("demo/derived/_chat_cache.json"))
         .env("OPEN_ONTOLOGIES_STUDIO_PORT", port.to_string())
         .spawn()
         .map_err(|e| format!("Failed to spawn agent sidecar: {e}"))?;
