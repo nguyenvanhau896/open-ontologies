@@ -22,11 +22,12 @@ chain remains for anyone who wants to see what the extractor actually did.
 from __future__ import annotations
 
 import pathlib
+import os
 import re
 import zipfile
 
-CORPUS = pathlib.Path("demo/corpus/dcat-us")
-OUT = pathlib.Path("demo/derived/_acl.ttl")
+CORPUS = pathlib.Path(os.environ.get("ONTO_CORPUS", "demo/corpus/dcat-us"))
+OUT = pathlib.Path(os.environ.get("ONTO_DATA_ROOT", ".")) / "demo/derived/_acl.ttl"
 
 PREFIX = "https://w3id.org/dcat-us-demo#"
 
@@ -87,7 +88,7 @@ def render(rows: list[dict[str, str]]) -> str:
 
 
 MARKER = "# --- normalised access control (demo/acl_normalise.py) ---"
-STORE = pathlib.Path("demo/derived/_store.ttl")
+STORE = pathlib.Path(os.environ.get("ONTO_DATA_ROOT", ".")) / "demo/derived/_store.ttl"
 
 
 def merge_into_store(rows: list[dict[str, str]]) -> str:

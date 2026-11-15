@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import json
 import pathlib
+import os
 import re
 import zipfile
 
-CORPUS = pathlib.Path("demo/corpus/dcat-us")
-OUT = pathlib.Path("demo/derived/_corpus_text.json")
+CORPUS = pathlib.Path(os.environ.get("ONTO_CORPUS", "demo/corpus/dcat-us"))
+OUT = pathlib.Path(os.environ.get("ONTO_DATA_ROOT", ".")) / "demo/derived/_corpus_text.json"
 
 
 def docx_text(path: pathlib.Path) -> str:

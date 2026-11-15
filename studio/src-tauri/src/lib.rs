@@ -38,20 +38,27 @@ pub fn run() {
             running: Arc::new(Mutex::new(false)),
         })
         .setup(|app| {
+            let workspace = app.path().app_data_dir()?.join("workspace");
+            std::fs::create_dir_all(workspace.join("demo/derived"))?;
+            std::env::set_var("ONTO_STUDIO_WORKSPACE", &workspace);
             let handle = app.handle().clone();
-            if let Err(e) = engine::spawn_engine(&handle) {
-                eprintln!("Failed to start engine: {e}");
-            } else {
-                app.state::<EngineState>().running.store(true, Ordering::Relaxed);
-            }
-
-            // Spawn agent sidecar after a delay to let the engine start first
+            engine::spawn_engine(&handle).map_err(std::io::Error::other)?;
             let agent_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                if let Err(e) = chat::spawn_agent_sidecar(&agent_handle) {
-                    eprintln!("Failed to start agent sidecar: {e}");
+            tauri::async_runtime::spawn(async move {
+                let client = reqwest::Client::new();
+                for _ in 0..60 {
+                    let ready = client.get(format!("http://127.0.0.1:{}/api/stats", engine::engine_port()))
+                        .timeout(std::time::Duration::from_secs(1)).send().await
+                        .is_ok_and(|r| r.status().is_success());
+                    if ready {
+                        agent_handle.state::<EngineState>().running.store(true, Ordering::Relaxed);
+                        let _ = tauri::Emitter::emit(&agent_handle, "engine-ready", true);
+                        if let Err(e) = chat::spawn_agent_sidecar(&agent_handle) { eprintln!("Failed to start agent: {e}"); }
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(500));
                 }
+                let _ = tauri::Emitter::emit(&agent_handle, "engine-stopped", true);
             });
 
             Ok(())

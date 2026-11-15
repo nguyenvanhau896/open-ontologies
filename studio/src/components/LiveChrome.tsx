@@ -25,7 +25,7 @@ import * as mcp from '../lib/mcp-client';
  */
 export function LiveChrome({ children }: { children: React.ReactNode }) {
   const [showChat, setShowChat] = useState(true);
-  const [graphMode, setGraphMode] = useState<'2d' | '3d'>('2d');
+  const [graphMode, setGraphMode] = useState<'2d' | '3d' | 'tree'>('2d');
   const [showInspector, setShowInspector] = useState(false);
   const [showLineage, setShowLineage] = useState(false);
   const [showGovernance, setShowGovernance] = useState(false);
@@ -156,7 +156,7 @@ export function LiveChrome({ children }: { children: React.ReactNode }) {
           <div className="w-px mx-1" style={{ background: 'var(--border)' }} />
           <div className="flex items-center rounded text-xs overflow-hidden"
                style={{ border: '1px solid var(--border)' }}>
-            {(['2d', '3d'] as const).map(m => (
+            {(['2d', '3d', 'tree'] as const).map(m => (
               <button key={m} onClick={() => setGraphMode(m)}
                       className="px-2 py-1 uppercase"
                       style={{ background: graphMode === m ? 'var(--accent)' : 'var(--bg-panel)',
@@ -194,9 +194,9 @@ export function LiveChrome({ children }: { children: React.ReactNode }) {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 relative">
-          {graphMode === '2d'
+          {graphMode === 'tree'
             ? <TreeView onNodeSelect={setSelectedNode} />
-            : <Graph3D graph={graph} onNodeSelect={setSelectedNode} />}
+            : <Graph3D graph={graph} mode={graphMode} onNodeSelect={setSelectedNode} />}
         </div>
 
         {showInspector && (

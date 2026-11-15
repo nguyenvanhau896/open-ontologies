@@ -45,7 +45,8 @@ import urllib.error
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-BIN = ROOT / "target" / "release" / "open-ontologies"
+DATA_ROOT = pathlib.Path(os.environ.get("ONTO_DATA_ROOT", str(ROOT)))
+BIN = pathlib.Path(os.environ.get("ONTO_ENGINE_BINARY", str(ROOT / "target" / "release" / "open-ontologies")))
 ENGINE = os.environ.get("ONTO_ENGINE", "http://127.0.0.1:8137")
 LLM_BASE = os.environ.get("ONTO_LLM_BASE_URL", "http://localhost:8081/v1").rstrip("/")
 LLM_KEY = os.environ.get("ONTO_LLM_API_KEY", "not-needed")
@@ -307,8 +308,8 @@ def normalise(text: str) -> str:
 
 def docx_text(path: pathlib.Path) -> str:
     if path.suffix == ".docx":
-        return subprocess.run(["pandoc", str(path), "-t", "plain", "--wrap=none"],
-                              capture_output=True, text=True).stdout
+        from corpus_text import docx_text as extract_docx
+        return extract_docx(path)
     # .md, .json, .ttl (and anything else pandoc has no business touching)
     # are already text; reading them directly is what lets a real corpus of
     # mixed document types (Task 7's DCAT-US corpus is markdown + JSON
@@ -1209,7 +1210,7 @@ def main():
     args = ap.parse_args()
 
     corpus = pathlib.Path(args.corpus)
-    out = ROOT / "demo" / "derived"
+    out = DATA_ROOT / "demo" / "derived"
     out.mkdir(exist_ok=True)
     # A real corpus is not one file type. Task 7's DCAT-US corpus is
     # markdown, JSON Schema and SHACL Turtle side by side (a schema-only

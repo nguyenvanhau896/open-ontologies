@@ -99,3 +99,7 @@ rocq/driver/rocq_horn_core.mli
 rocq/driver/*.cmi
 rocq/driver/*.cmx
 rocq/driver/*.o
+
+# Generated Ubuntu package inputs
+studio/src-tauri/runtime/
+studio/src-tauri/ubuntu-resources/

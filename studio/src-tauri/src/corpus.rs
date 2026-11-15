@@ -35,32 +35,14 @@ fn resolve_python() -> String {
             return explicit;
         }
     }
-    let root = repo_root();
-    let candidates = [
-        root.join(".venv/bin/python3"),
-        root.join("venv/bin/python3"),
-        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("scratch/.venv/bin/python3"),
-    ];
-    for c in candidates {
-        if c.exists() {
-            return c.to_string_lossy().into_owned();
-        }
-    }
     "python3".into()
-}
-
-/// Single-quote a value for safe inclusion in a shell command.
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 /// Repository root, derived from the crate location at compile time.
 pub fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."))
+    std::env::var_os("ONTO_STUDIO_WORKSPACE").map(PathBuf::from).unwrap_or_else(|| {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().to_path_buf()
+    })
 }
 
 /// Corpora offered in the UI. The third element is a document count and MUST
@@ -123,30 +105,27 @@ pub fn ingest_corpus(
         return Err(format!("pipeline not found at {}", script.display()));
     }
 
-    // An app launched from Finder inherits a minimal PATH, so a bare "python3"
-    // resolves to /usr/bin/python3 rather than whichever interpreter actually
-    // has the pipeline's dependencies installed. Run through a LOGIN shell so
-    // the user's real PATH applies, and let ONTO_PYTHON override outright.
+    // Invoke the interpreter directly; no login shell is required.
     let python = resolve_python();
-    let cached = if live { "" } else { "--cached" };
-    let command = format!(
-        "{} {} {} --corpus {}",
-        shell_quote(&python),
-        shell_quote(&script.to_string_lossy()),
-        cached,
-        shell_quote(&folder),
-    );
-
-    let mut child = Command::new("/bin/zsh")
-        .arg("-lc")
-        .arg(&command)
-        .current_dir(&root)
+    let engine_binary = crate::engine::resolve_engine_binary(&app).map_err(|e| {
+        if let Ok(mut running) = running_flag.lock() { *running = false; }
+        e
+    })?;
+    let mut command = Command::new(&python);
+    command.arg(&script).arg("--corpus").arg(&folder);
+    if !live { command.arg("--cached"); }
+    let mut child = command
+        .current_dir(repo_root())
+        .env("ONTO_DATA_ROOT", repo_root())
+        .env("ONTO_CORPUS", &folder)
+        .env("ONTO_ENGINE_BINARY", engine_binary)
+        .env("ONTO_ENGINE", format!("http://127.0.0.1:{}", crate::engine::engine_port()))
         // Strip ANSI colour: the pane renders plain text.
         .env("NO_COLOR", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("failed to start pipeline: {e}"))?;
+        .map_err(|e| { if let Ok(mut running) = running_flag.lock() { *running = false; } format!("failed to start pipeline: {e}") })?;
 
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let stderr = child.stderr.take().ok_or("no stderr")?;
@@ -164,6 +143,7 @@ pub fn ingest_corpus(
     let handle = app.clone();
     let running_flag = running_flag.clone();
     let normalise_root = root.clone();
+    let corpus_folder = folder.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             let _ = handle.emit("corpus-progress", line);
@@ -186,14 +166,11 @@ pub fn ingest_corpus(
                 if !path.exists() {
                     continue;
                 }
-                let out = Command::new("/bin/zsh")
-                    .arg("-lc")
-                    .arg(format!(
-                        "{} {}",
-                        shell_quote(&resolve_python()),
-                        shell_quote(&path.to_string_lossy())
-                    ))
-                    .current_dir(&normalise_root)
+                let out = Command::new(resolve_python())
+                    .arg(&path)
+                    .env("ONTO_CORPUS", &corpus_folder)
+                    .env("ONTO_DATA_ROOT", repo_root())
+                    .current_dir(repo_root())
                     .output();
                 match out {
                     Ok(o) if o.status.success() => {
